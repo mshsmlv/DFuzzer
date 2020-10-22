@@ -1,0 +1,11 @@
+{
+  "name": "DFuzzer",
+  "version": "1.0.0",
+  "description": "All right, brain. You don't like me and I don't like you, but let's just do this and I can get back to killing you with beer.",
+  "dependencies": {
+    "esprima": "~1.1.1",
+    "escope": "~1.0.1",
+    "escodegen": "~2.0.0",
+    "estraverse": "~5.2.0"
+  }
+}
