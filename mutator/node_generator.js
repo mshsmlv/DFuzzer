@@ -18,8 +18,12 @@ function randomChoice(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
+function generate_block_statement(node, scopeManager) {
+    var currentScope = scopeManager.acquire(node);
+    console.log(currentScope);
+}
 
-function mutate(ast) {
+function mutate(ast, scopeManager) {
     estraverse.traverse(ast, {
         enter: function (node, parent) {
             if (node.type == 'BinaryExpression') {
@@ -37,6 +41,7 @@ function mutate(ast) {
             if (node.type == 'UpdateExpression') {
                 node.operator = randomChoice(update_operator);
             }
+            generate_block_statement(node, scopeManager);
         },
         leave: function (node, parent) {
             if (node.type == 'VariableDeclarator')
@@ -45,12 +50,22 @@ function mutate(ast) {
     });
 };
 
+module.exports = {
+    mutate_code: mutate_code,
+};
+
+function mutate_code(code) {
+    var ast = esprima.parse(code);
+    var scopeManager = escope.analyze(ast);
+  
+    mutate(ast, scopeManager);
+    return escodegen.generate(ast);
+}
+
 var seed_file = process.argv[2];
 var rf = require("fs");
 var raw = rf.readFileSync(seed_file, "utf-8");
 
-var ast = esprima.parse(raw);
+mutated_code = mutate_code(raw);
 
-mutate(ast);
-
-console.log(escodegen.generate(ast));
+console.log(mutated_code);

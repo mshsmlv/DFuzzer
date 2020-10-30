@@ -6,6 +6,8 @@
     "esprima": "~1.1.1",
     "escope": "~1.0.1",
     "escodegen": "~2.0.0",
-    "estraverse": "~5.2.0"
+    "estraverse": "~5.2.0",
+    "express": "4.16.0",
+    "body-parser": "1.19.0"
   }
 }

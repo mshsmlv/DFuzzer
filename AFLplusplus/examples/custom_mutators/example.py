@@ -15,15 +15,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 '''
 
 import random
-
-
-COMMANDS = [
-    b"GET",
-    b"PUT",
-    b"DEL",
-    b"AAAAAAAAAAAAAAAAA",
-]
-
+import requests
 
 def init(seed):
     '''
@@ -56,16 +48,16 @@ def fuzz(buf, add_buf, max_size):
     @rtype: bytearray
     @return: A new bytearray containing the mutated data
     '''
-    ret = bytearray(100)
 
-    ret[:3] = random.choice(COMMANDS)
-
+    r = requests.post("http://127.0.0.1:8080/get_next", data={"code": buf.decode()})
+    ret = bytearray(len(r.text))
+    ret[:len(r.text)] = r.text.encode()
     return ret
 
 # Uncomment and implement the following methods if you want to use a custom
 # trimming algorithm. See also the documentation for a better API description.
 
-# def init_trim(buf):
+def init_trim(buf):
 #     '''
 #     Called per trimming iteration.
 #
@@ -83,8 +75,8 @@ def fuzz(buf, add_buf, max_size):
 #     # If this is not possible for your trimming, you can
 #     # return 1 instead and always return 0 in post_trim
 #     # until you are done (then you return 1).
-#
-#     return steps
+
+    return 0
 #
 # def trim():
 #     '''
@@ -159,7 +151,7 @@ def fuzz(buf, add_buf, max_size):
 #     '''
 #     return prob
 #
-# def queue_get(filename):
+def queue_get(filename):
 #     '''
 #     Called at the beginning of each fuzz iteration to determine whether the
 #     test case should be fuzzed
@@ -171,9 +163,10 @@ def fuzz(buf, add_buf, max_size):
 #     @return: Return True if the custom mutator decides to fuzz the test case,
 #         and False otherwise
 #     '''
-#     return True
+    print(filename)
+    return True
 #
-# def queue_new_entry(filename_new_queue, filename_orig_queue):
+def queue_new_entry(filename_new_queue, filename_orig_queue):
 #     '''
 #     Called after adding a new test case to the queue
 #
@@ -183,4 +176,5 @@ def fuzz(buf, add_buf, max_size):
 #     @type filename_orig_queue: str
 #     @param filename_orig_queue: File name of the original queue entry
 #     '''
-#     pass
+    requests.post("http://127.0.0.1:8080/reg_new_path", data={"new_path": filename_new_queue})  
+    pass
