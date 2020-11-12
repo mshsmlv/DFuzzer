@@ -78,7 +78,12 @@ function extract_variable_names(var_map, var_array) {
     for(var i = 0; i < var_array.length; i++) {
         var_map.set(var_array[i].name, 1);
     }
-    return var_map;
+}
+
+function delete_variables_name(var_map, var_array) {
+    for(var i = 0; i < var_array.length; i++) {
+        var_map.delete(var_array[i].name);
+    }
 }
 
 // mutate_blocks replaces blocks:
@@ -92,16 +97,33 @@ function extract_variable_names(var_map, var_array) {
 // "BlockStatement":
 //
 // It queries new block with the same type from the given data-set.
-function mutate_blocks(ast, scopeManager) {
+function mutate_blocks(ast) {
+    var scopeManager = escope.analyze(ast);
+
     var current_variables = new Map();
 
-
-    // эта херня еще названия функций включает
-    // эта херня еще включает все переменные, которые объявлены ниже!!!!!!
-    extract_variable_names(current_variables, scopeManager.acquire(ast).variables);
+    var in_function = false;
+    
+    var is_need_refresh_scope_manager = false;
+    var variables_to_delete = [];
 
     estraverse.replace(ast, {
         enter: function (node, parent) {
+            if(is_need_refresh_scope_manager) {
+                scopeManager = escope.analyze(ast);
+                is_need_refresh_scope_manager = false;
+            }
+
+            if (/Function/.test(node.type)) {
+                in_function = true;
+            }
+
+            // skip function names -_0_0_-.
+            if (in_function && !/Function/.test(node.type)) {
+                variables_to_delete = variables_to_delete.concat(scopeManager.getDeclaredVariables(node));
+            }
+            
+            extract_variable_names(current_variables, scopeManager.getDeclaredVariables(node));
             switch (node.type) {
                 case "ForStatement":
                 case  "ForInStatement":
@@ -109,8 +131,8 @@ function mutate_blocks(ast, scopeManager) {
                 case  "DoWhileStatement":
                 case  "SwitchStatement":
                 case  "WhileStatement":
-                case  "WithStatement":
-                case  "BlockStatement": break; // Нужен ли нам блок стейтмент?
+                case  "WithStatement": break;
+                //case  "BlockStatement": break; // Нужен ли нам блок стейтмент?
                 default: return;
             }
 
@@ -124,29 +146,19 @@ function mutate_blocks(ast, scopeManager) {
 
            // var [new_node, source_tree] = getNode(node.type);
 
-
-            // Get everything what we can !!!!!!
-            var current_parent_scope = scopeManager.acquire(parent);
-            var current_node_scope = scopeManager.acquire(node);
-
-            if (current_parent_scope) {
-                extract_variable_names(current_variables, current_parent_scope.variables);
-            }
-            if (current_node_scope) {
-                extract_variable_names(current_variables, current_node_scope.variables);
-            }
-
             // change variables name in new node if they are not declarated to the declarated variables:
             // it can be:
             // - global variable from mutated ast
-            // - variable which are accsessible for the current context(visible in a function or in a loop)
+            // - variable which are accsessible for the current context(visible in a function and global variables)
             // 
             // OR leave variable name if it is declarated in new node
             //
             // 
             // Если мы идем вглубь дерева, а мы идем вглубь, то видимость переменных сохраняется,
             // просто добавляются новые.
-
+            // Видимость переменных в джава-скрипт ограничивается только функциями.
+            // https://habr.com/ru/post/78991/
+            //
             new_node_variables = new Map();
             estraverse.traverse(new_node, {
                 enter: function (node, parent) {
@@ -185,9 +197,18 @@ function mutate_blocks(ast, scopeManager) {
                 },
                 leave: function (node, parent) {}
             });
-            return new_node;
 
-        }
+            is_need_refresh_scope_manager = true;
+            return new_node;
+        }, 
+        leave: function (node, parent) {  
+            // delete variables which are declarated in node.
+            if (/Function/.test(node.type)) {
+                delete_variables_name(current_variables, variables_to_delete);
+                variables_to_delete = [];
+                in_function = false;
+            }
+        },
     })
 }
 
@@ -222,9 +243,7 @@ module.exports = {
 
 function mutate_code(code) {
     var ast = esprima.parse(code);
-    var scopeManager = escope.analyze(ast);
-  
-    mutate_blocks(ast, scopeManager);
+    mutate_blocks(ast);
     return escodegen.generate(ast);
 }
 

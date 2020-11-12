@@ -7,14 +7,12 @@ var a2 = 0;
 var a3 = 0;
 var a4 = 0;
 
-function test( num ) {
-    return num * num;
+function test() {
+	var some_var = 0;
+	some_var += 90;
+	for (var i = 0; i < 20; i++) {
+		a0 += 1;	
+	}
 }
 
-
-console.log(test(3));
-
-if (test(a) == 90) {
-    console.log('lol');
-}
-
+test();
