@@ -17,199 +17,254 @@ function randomChoice(arr) {
 
 // ./data-set/basic/testPrimitiveConstructorPrototype.js 2
 
+// ./data-set/basic/joinTest.js index: 2
 
-function __get_node(ast, aimed_type, index) {
-    var res_nodes = []
-    estraverse.traverse(ast, {
-        enter: function (node, parent) {
-            if (node.type == aimed_type) {
-                res_nodes.push(node);
-            }
-        },
-        leave: function (node, parent) {
+
+
+class NodeReplacer {
+    constructor(ast) {
+        this.ast = ast;
+        this.scopeManager = escope.analyze(this.ast);
+
+        this.in_function = false; // TODO I think we need an array of function because of nested functions.
+        this.in_loop = false;
+        this.is_switch = false;
+
+        // Helps to control variables.
+        this.global_variables = new Map();
+        this.function_variables = new Map();
+        this.new_node_variables = new Map();
+        this.is_need_refresh_scope_manager = false;
+        this.variables_to_delete = [];
+    }
+
+    __extract_variable_names(var_map, var_array) {
+        for(var i = 0; i < var_array.length; i++) {
+            var_map.set(var_array[i].name, 1);
         }
-    });
+    }
 
-    if (!index) {
-        index = Math.floor(Math.random() * res_nodes
-        .length);
-        };
+    extract_global_variables(var_array) {
+        this.__extract_variable_names(this.global_variables, var_array);
+    }
 
-        console.log("index:", index);
-        return [res_nodes[index], ast];
-}
+    extract_function_variables(var_array) {
+        this.__extract_variable_names(this.function_variables, var_array);
+    }
 
-function getNode(aimed_type) {
-    while (true){ 
-        var tree_file = "./data-set/basic/" + randomChoice(trees);
-        var code = fs.readFileSync(tree_file, "utf-8");
+    extract_new_node_varibles(var_array) {
+        this.__extract_variable_names(this.new_node_variables, var_array);
+    }
 
-        try {
-            var ast = esprima.parse(code);
-        } catch(e) {
-            continue
+    free_function_variables() {
+        this.function_variables = new Map();
+    }
+
+    free_new_node_variables() {
+        this.new_node_varibles = new Map();
+    }
+
+    free_variables(var_array) {
+        var self = this;
+        for(var i = 0; i < var_array.length; i++) {
+            self.global_variables.set(var_array[i].name, 1);
         }
-        console.log(tree_file);
-        var [new_node, source_tree] = __get_node(ast, aimed_type);
-        if (new_node) {
-            return [new_node, source_tree];
-        }
-        continue;
-    }   
-}
+    }
 
-function getSpecifiedNode(tree_file, node_index, aimed_type) {
-    var code = fs.readFileSync(tree_file, "utf-8");
-    var ast = esprima.parse(code);
-
-    return __get_node(ast, aimed_type, node_index);
-}
-
-function check_variable_existence(var_array, varname) {
-    for(var i = 0; i < var_array.length; i++) {
-        if (var_array[i].name == varname) {
+    var_is_exists(name) {
+        if (this.global_variables.get(name)) {
             return true;
         }
+        if (this.new_node_variables.get(name)) {
+            return true;
+        }
+        if (this.function_variables.get(name)) {
+            return true;
+        }
+        return false;
     }
-    return false;
-}
 
-function extract_variable_names(var_map, var_array) {
-    for(var i = 0; i < var_array.length; i++) {
-        var_map.set(var_array[i].name, 1);
+    rand_variable_name() {
+        var merged = new Map([...this.global_variables, ...this.new_node_variables, ...this.function_variables]);
+        return randomChoice(Array.from(merged.keys()))
     }
-}
-
-function delete_variables_name(var_map, var_array) {
-    for(var i = 0; i < var_array.length; i++) {
-        var_map.delete(var_array[i].name);
-    }
-}
-
-// mutate_blocks replaces blocks:
-// "ForStatement":
-// "ForInStatement":
-// "IfStatement":
-// "DoWhileStatement":
-// "SwitchStatement":
-// "WhileStatement":
-// "WithStatement":
-// "BlockStatement":
-//
-// It queries new block with the same type from the given data-set.
-function mutate_blocks(ast) {
-    var scopeManager = escope.analyze(ast);
-
-    var current_variables = new Map();
-
-    var in_function = false;
     
-    var is_need_refresh_scope_manager = false;
-    var variables_to_delete = [];
-
-    estraverse.replace(ast, {
-        enter: function (node, parent) {
-            if(is_need_refresh_scope_manager) {
-                scopeManager = escope.analyze(ast);
-                is_need_refresh_scope_manager = false;
+    __get_node(ast, aimed_type, index) {
+        var res_nodes = []
+        estraverse.traverse(ast, {
+            enter: function (node, parent) {
+                if (node.type == aimed_type) {
+                    res_nodes.push(node);
+                }
+            },
+            leave: function (node, parent) {
             }
+        });
 
-            if (/Function/.test(node.type)) {
-                in_function = true;
+        if (!index) {
+            index = Math.floor(Math.random() * res_nodes
+            .length);
+            };
+
+            console.log("index:", index);
+            return [res_nodes[index], ast];
+    }
+
+    getNode(aimed_type) {
+        var self = this;
+
+        while (true) { 
+            var tree_file = "./data-set/basic/" + randomChoice(trees);
+            var code = fs.readFileSync(tree_file, "utf-8");
+
+            try {
+                var ast = esprima.parse(code);
+            } catch(e) {
+                continue
             }
-
-            // skip function names -_0_0_-.
-            if (in_function && !/Function/.test(node.type)) {
-                variables_to_delete = variables_to_delete.concat(scopeManager.getDeclaredVariables(node));
+            console.log(tree_file);
+            var [new_node, source_tree] = self.__get_node(ast, aimed_type);
+            if (new_node) {
+                return [new_node, source_tree];
             }
-            
-            extract_variable_names(current_variables, scopeManager.getDeclaredVariables(node));
-            switch (node.type) {
-                case "ForStatement":
-                case  "ForInStatement":
-                case  "IfStatement":
-                case  "DoWhileStatement":
-                case  "SwitchStatement":
-                case  "WhileStatement":
-                case  "WithStatement": break;
-                //case  "BlockStatement": break; // Нужен ли нам блок стейтмент?
-                default: return;
-            }
+            continue;
+        }
+    }
 
-          //  switch (Math.random()%2) {
-            //    case 0: return
-              //  case 1: // generate
-            //}
-            
-            var [new_node, source_tree] = getSpecifiedNode("./data-set/basic/testNegZero1.js", 0, node.type);
-            var sourceScopeManager = escope.analyze(source_tree);
+    getSpecifiedNode(tree_file, node_index, aimed_type) {
+        var self = this;
 
-           // var [new_node, source_tree] = getNode(node.type);
+        var code = fs.readFileSync(tree_file, "utf-8");
+        var ast = esprima.parse(code);
 
-            // change variables name in new node if they are not declarated to the declarated variables:
-            // it can be:
-            // - global variable from mutated ast
-            // - variable which are accsessible for the current context(visible in a function and global variables)
-            // 
-            // OR leave variable name if it is declarated in new node
-            //
-            // 
-            // Если мы идем вглубь дерева, а мы идем вглубь, то видимость переменных сохраняется,
-            // просто добавляются новые.
-            // Видимость переменных в джава-скрипт ограничивается только функциями.
-            // https://habr.com/ru/post/78991/
-            //
-            new_node_variables = new Map();
-            estraverse.traverse(new_node, {
-                enter: function (node, parent) {
-                    // returns list of variables which are declarated in a node.
-                    // See https://github.com/estools/escope/blob/49a00b8b41c8d6221446bbf6b426d1ea64d80d00/src/scope-manager.js#L98
-                    extract_variable_names(new_node_variables, sourceScopeManager.getDeclaredVariables(node));
-                    if (node.object) {
-                        if (node.object.type == "Identifier") {
-                            if (!current_variables.get(node.object.name) && !new_node_variables.get(node.object.name)) {
-                                node.object.name = randomChoice(Array.from(current_variables.keys()));
-                            };
+        return self.__get_node(ast, aimed_type, node_index);
+    }
+
+    // mutate_blocks replaces blocks:
+    // "ForStatement":
+    // "ForInStatement":
+    // "IfStatement":
+    // "DoWhileStatement":
+    // "SwitchStatement":
+    // "WhileStatement":
+    // "WithStatement":
+    // "BlockStatement":
+    //
+    // It queries new block with the same type from the given data-set.
+    mutate_blocks() {
+        var self = this;
+
+        estraverse.replace(self.ast, {
+            enter: function (node, parent) {
+                if(self.is_need_refresh_scope_manager) {
+                    self.scopeManager = escope.analyze(self.ast);
+                    self.is_need_refresh_scope_manager = false;
+                }
+
+                if (/Function/.test(node.type)) {
+                    self.in_function = true;
+                }
+
+                // skip function names -_0_0_-.
+                if (self.in_function && !/Function/.test(node.type)) {
+                    self.extract_function_variables(self.scopeManager.getDeclaredVariables(node));
+                } else {
+                    self.extract_global_variables(self.scopeManager.getDeclaredVariables(node));
+                }            
+
+                switch (node.type) {
+                    case "ForStatement":
+                    case  "ForInStatement":
+                    case  "IfStatement":
+                    case  "DoWhileStatement":
+                    case  "SwitchStatement":
+                    case  "WhileStatement":
+                    case  "WithStatement": break;
+                    //case  "BlockStatement": break; // Нужен ли нам блок стейтмент?
+                    default: return;
+                }
+
+                //  switch (Math.random()%2) {
+                //    case 0: return
+                    //  case 1: // generate
+                //}
+                
+                // var [new_node, source_tree] = self.getSpecifiedNode("./data-set/basic/joinTest.js", 2, node.type);
+                var [new_node, source_tree] = self.getNode(node.type);
+                var sourceScopeManager = escope.analyze(source_tree);
+
+                // change variables name in new node if they are not declarated to the declarated variables:
+                // it can be:
+                // - global variable from mutated ast
+                // - variable which are accsessible for the current context(visible in a function and global variables)
+                // 
+                // OR leave variable name if it is declarated in new node
+                //
+                // 
+                // Если мы идем вглубь дерева, а мы идем вглубь, то видимость переменных сохраняется,
+                // просто добавляются новые.
+                // Видимость переменных в джава-скрипт ограничивается только функциями.
+                // https://habr.com/ru/post/78991/
+                //
+                estraverse.traverse(new_node, {
+                    enter: function (node, parent) {
+                        // returns list of variables which are declarated in a node.
+                        // See https://github.com/estools/escope/blob/49a00b8b41c8d6221446bbf6b426d1ea64d80d00/src/scope-manager.js#L98
+                        self.extract_new_node_varibles(sourceScopeManager.getDeclaredVariables(node));
+                        if (node.object) {
+                            if (node.object.type == "Identifier") {
+                                if (!self.var_is_exists(node.object.name)) {
+                                    node.object.name = self.rand_variable_name();
+                                };
+                            }
                         }
-                    }
-                    if (node.left) {
-                        if (node.left.type == "Identifier") {
-
-                            if (!current_variables.get(node.left.name) && !new_node_variables.get(node.left.name)) {
-                                node.left.name = randomChoice(Array.from((current_variables.keys())));
-                            };
+                        if (node.left) {
+                            if (node.left.type == "Identifier") {
+                                if (!self.var_is_exists(node.left.name)) {
+                                    node.left.name = self.rand_variable_name();
+                                };
+                            }
                         }
-                    }
-                    if (node.right) {
-                        if (node.right.type == "Identifier") {
-                            if (!current_variables.get(node.right.name) && !new_node_variables.get(node.right.name)) {
-                                node.right.name = randomChoice(Array.from(current_variables.keys()));
-                            };
+                        if (node.right) {
+                            if (node.right.type == "Identifier") {
+                                if (!self.var_is_exists(node.right.name)) {
+                                    node.right.name = self.rand_variable_name();
+                                };
+                            }
                         }
-                    }
-                    if (node.argument) {
-                        if (node.argument.type == "Identifier") {
-                            if (!current_variables.get(node.argument.name) && !new_node_variables.get(node.argument.name)) {
-                                node.argument.name = randomChoice(Array.from(current_variables.keys()));
-                            };
-                        } 
-                    }
-                },
-                leave: function (node, parent) {}
-            });
-
-            is_need_refresh_scope_manager = true;
-            return new_node;
-        }, 
-        leave: function (node, parent) {  
-            // delete variables which are declarated in node.
-            if (/Function/.test(node.type)) {
-                delete_variables_name(current_variables, variables_to_delete);
-                variables_to_delete = [];
-                in_function = false;
-            }
-        },
-    })
+                        if (node.argument) {
+                            if (node.argument.type == "Identifier") {
+                                if (!self.var_is_exists(node.argument.name)) {
+                                    node.argument.name = self.rand_variable_name();
+                                };
+                            } 
+                        }
+                        if (node.property) { // ?? a[i] i - это будет проперти, что делать с тем, что он свойства начал у всех заменять -_-
+                            if (node.property.type == "Identifier") {
+                                if (!self.var_is_exists(node.property.name)) {
+                                    node.property.name = self.rand_variable_name();
+                                };
+                            } 
+                        }
+                    },
+                    leave: function (node, parent) {}
+                });
+                self.free_new_node_variables();
+                self.is_need_refresh_scope_manager = true;
+                return new_node;
+            }, 
+            leave: function (node, parent) {  
+                // delete variables which are declarated in node.
+                if (/Function/.test(node.type)) {
+                    self.free_function_variables();
+                    self.in_function = false;
+                }
+            },
+        })
+    }
+    get_mutated_code() {
+        return escodegen.generate(this.ast);
+    }
 }
 
 let binary_operator = ['+','-','*','/','%','**','&','|','^','<<','>>','>>>']; // Math operator
@@ -243,8 +298,10 @@ module.exports = {
 
 function mutate_code(code) {
     var ast = esprima.parse(code);
-    mutate_blocks(ast);
-    return escodegen.generate(ast);
+
+    node_replacer = new NodeReplacer(ast);
+    node_replacer.mutate_blocks();
+    return node_replacer.get_mutated_code();
 }
 
 var fs = require("fs");
