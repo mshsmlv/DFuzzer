@@ -26,16 +26,26 @@ class NodeReplacer {
         this.ast = ast;
         this.scopeManager = escope.analyze(this.ast);
 
-        this.in_function = false; // TODO I think we need an array of function because of nested functions.
         this.in_loop = false;
-        this.is_switch = false;
+        this.in_switch = false;
 
         // Helps to control variables.
         this.global_variables = new Map();
         this.function_variables = new Map();
         this.new_node_variables = new Map();
         this.is_need_refresh_scope_manager = false;
-        this.variables_to_delete = [];
+
+
+        // we can have nested function declarations and leaving function context not garantee that we left function.
+        this.function_stack = []; // [fun_name1, fun_name2], just to debug
+        this.prev_scope = []; // [map1{}, map2{}],  stores previous scopes to restore scope of wrapper
+    }
+
+    in_function() {
+        if (this.function_stack.length > 0) {
+            return true;
+        }
+        return false;
     }
 
     __extract_variable_names(var_map, var_array) {
@@ -57,7 +67,12 @@ class NodeReplacer {
     }
 
     free_function_variables() {
-        this.function_variables = new Map();
+        this.function_variables = this.prev_scope.pop();
+        if (!this.function_variables) {
+            this.function_variables = new Map();
+        }
+
+        this.function_stack.pop();
     }
 
     free_new_node_variables() {
@@ -85,15 +100,50 @@ class NodeReplacer {
     }
 
     rand_variable_name() {
-        var merged = new Map([...this.global_variables, ...this.new_node_variables, ...this.function_variables]);
+        var merged = new Map([
+            ...this.global_variables, 
+            ...this.new_node_variables, 
+            ...this.function_variables
+        ]);
         return randomChoice(Array.from(merged.keys()))
     }
+
+    // it skipes nodes which are not applicable for the current context.
+    __node_is_applicable(node) {
+        var self = this;
+        var is_applicable = true;
+        estraverse.traverse(node, {
+            enter: function (node, parent) {
+                switch (node.type) {
+                    case 'BreakStatement':
+                        if (!self.in_loop && !self.in_switch) {
+                            is_applicable = false;
+                        };
+                        break;
+                    case 'ReturnStatement':
+                        if (!self.in_function()) {
+                            is_applicable = false;
+                        }
+                    case 'ContinueStatement':
+                        if (!self.in_loop) {
+                            is_applicable = false;
+                        }
+                }
+            },
+            leave: function (node, parent) {}
+        })
+        return is_applicable;
+    }
     
+    // it gets applicable node for the current context with @aimed_type.
+    // if @index is set it will return all_applicable_nodes_from_ast[index].
+    // if @index is not set it will return all_applicable_nodes_from_ast[random_index].
     __get_node(ast, aimed_type, index) {
+        var self = this;
         var res_nodes = []
         estraverse.traverse(ast, {
             enter: function (node, parent) {
-                if (node.type == aimed_type) {
+                if (node.type == aimed_type && self.__node_is_applicable(node)) {
                     res_nodes.push(node);
                 }
             },
@@ -131,6 +181,7 @@ class NodeReplacer {
         }
     }
 
+    // just for debug. It gets a node from a specified tree with the specified index.
     getSpecifiedNode(tree_file, node_index, aimed_type) {
         var self = this;
 
@@ -162,15 +213,32 @@ class NodeReplacer {
                 }
 
                 if (/Function/.test(node.type)) {
-                    self.in_function = true;
+                    if (node.id) {
+                        self.function_stack.push(node.id.name);
+                    } else {
+                        self.function_stack.push("anon_function");
+                    }
+
+                    self.prev_scope.push(new Map(self.function_variables));
                 }
 
-                // skip function names -_0_0_-.
-                if (self.in_function && !/Function/.test(node.type)) {
-                    self.extract_function_variables(self.scopeManager.getDeclaredVariables(node));
+                switch(node.type) {
+                    case "DoWhileStatement":
+                    case "ForStatement":
+                    case "ForInStatement":
+                    case "ForOfStatement":
+                    case "WhileStatement": self.in_loop = true; break;
+                    case "SwitchStatement": self.is_switch = true; break;
+                }
+
+                if (self.in_function()) {
+                    // skip function names -_0_0_-.
+                    if (!/Function/.test(node.type)) {
+                        self.extract_function_variables(self.scopeManager.getDeclaredVariables(node));
+                    }
                 } else {
                     self.extract_global_variables(self.scopeManager.getDeclaredVariables(node));
-                }            
+                }   
 
                 switch (node.type) {
                     case "ForStatement":
@@ -254,10 +322,18 @@ class NodeReplacer {
                 return new_node;
             }, 
             leave: function (node, parent) {  
-                // delete variables which are declarated in node.
+                // delete variables which are declarated in function node.
                 if (/Function/.test(node.type)) {
                     self.free_function_variables();
-                    self.in_function = false;
+                }
+
+                switch(node.type) {
+                    case "DoWhileStatement":
+                    case "ForStatement":
+                    case "ForInStatement":
+                    case "ForOfStatement":
+                    case "WhileStatement": self.in_loop = false; break;
+                    case "SwitchStatement": self.is_switch = false; break;
                 }
             },
         })

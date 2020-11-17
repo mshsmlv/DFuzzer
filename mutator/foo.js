@@ -8,6 +8,10 @@ var a3 = 0;
 var a4 = 0;
 
 function test() {
+	var foo = function() {
+		var some_nested_var = 45;
+		console.log("do somethisng");
+	}
 	var some_var = 0;
 	some_var += 90;
 	for (var i = 0; i < 20; i++) {
