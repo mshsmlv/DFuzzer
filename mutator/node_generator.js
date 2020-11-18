@@ -2,6 +2,7 @@ var esprima = require('esprima');
 var escope = require('escope');
 var estraverse = require('estraverse');
 var escodegen = require('escodegen');
+var esquery = require('esquery');
 
 // https://esprima.readthedocs.io/en/latest/syntax-tree-format.html - вся инфа по возможным нодам
 
@@ -18,8 +19,6 @@ function randomChoice(arr) {
 // ./data-set/basic/testPrimitiveConstructorPrototype.js 2
 
 // ./data-set/basic/joinTest.js index: 2
-
-
 
 class NodeReplacer {
     constructor(ast) {
@@ -86,7 +85,7 @@ class NodeReplacer {
         }
     }
 
-    var_is_exists(name) {
+    var_exists(name) {
         if (this.global_variables.get(name)) {
             return true;
         }
@@ -205,6 +204,7 @@ class NodeReplacer {
     mutate_blocks() {
         var self = this;
 
+        var nodes_to_insert = new Map();
         estraverse.replace(self.ast, {
             enter: function (node, parent) {
                 if(self.is_need_refresh_scope_manager) {
@@ -222,15 +222,6 @@ class NodeReplacer {
                     self.prev_scope.push(new Map(self.function_variables));
                 }
 
-                switch(node.type) {
-                    case "DoWhileStatement":
-                    case "ForStatement":
-                    case "ForInStatement":
-                    case "ForOfStatement":
-                    case "WhileStatement": self.in_loop = true; break;
-                    case "SwitchStatement": self.is_switch = true; break;
-                }
-
                 if (self.in_function()) {
                     // skip function names -_0_0_-.
                     if (!/Function/.test(node.type)) {
@@ -238,27 +229,23 @@ class NodeReplacer {
                     }
                 } else {
                     self.extract_global_variables(self.scopeManager.getDeclaredVariables(node));
-                }   
+                }
 
-                switch (node.type) {
+                switch(node.type) {
+                    case "DoWhileStatement":
                     case "ForStatement":
-                    case  "ForInStatement":
-                    case  "IfStatement":
-                    case  "DoWhileStatement":
-                    case  "SwitchStatement":
-                    case  "WhileStatement":
+                    case "ForInStatement":
+                    case "ForOfStatement":
+                    case "WhileStatement": self.in_loop = true;
+                    case "SwitchStatement": self.is_switch = true;
                     case  "WithStatement": break;
                     //case  "BlockStatement": break; // Нужен ли нам блок стейтмент?
                     default: return;
                 }
-
-                //  switch (Math.random()%2) {
-                //    case 0: return
-                    //  case 1: // generate
-                //}
                 
-                // var [new_node, source_tree] = self.getSpecifiedNode("./data-set/basic/joinTest.js", 2, node.type);
-                var [new_node, source_tree] = self.getNode(node.type);
+                var [new_node, source_tree] = self.getSpecifiedNode("./tests/insert_function_test.js", 0, node.type);
+
+                //var [new_node, source_tree] = self.getNode(node.type);
                 var sourceScopeManager = escope.analyze(source_tree);
 
                 // change variables name in new node if they are not declarated to the declarated variables:
@@ -274,45 +261,50 @@ class NodeReplacer {
                 // Видимость переменных в джава-скрипт ограничивается только функциями.
                 // https://habr.com/ru/post/78991/
                 //
+                //
+                //
+                //
+                // TODO нужно отслеживать "CallExpression" тип и затягивать функции в мутируемое дерево, если она не объявлена.
+                // Для этого нужно отслеживать глобальные функции, которые объявлены. Если ее нет в этом массиве(или что это есть),
+                // то вставляем.
                 estraverse.traverse(new_node, {
                     enter: function (node, parent) {
                         // returns list of variables which are declarated in a node.
                         // See https://github.com/estools/escope/blob/49a00b8b41c8d6221446bbf6b426d1ea64d80d00/src/scope-manager.js#L98
                         self.extract_new_node_varibles(sourceScopeManager.getDeclaredVariables(node));
-                        if (node.object) {
-                            if (node.object.type == "Identifier") {
-                                if (!self.var_is_exists(node.object.name)) {
-                                    node.object.name = self.rand_variable_name();
-                                };
+
+                        if (parent) {
+                            // it means we are in a function call.
+                            if (node.type == "Identifier" && parent.type == "CallExpression") {
+                                var selector = `[type="FunctionDeclaration"][id.name="${node.name}"]`;
+                                // if calling function not in the tree, try to extraxt this node from source tree.
+
+                                if (nodes_to_insert.get(node.name)) {
+                                    return;
+                                }
+                                if (esquery.query(self.ast, selector).length == 0) {
+                                    var node_from_source = esquery.query(source_tree, selector)
+                                    if (node_from_source.length > 0) {
+                                        nodes_to_insert.set(node.name, node_from_source[0]);
+                                    }
+                                }
+                                return // do not replace function calls.
+                            }
+                            if (node.type == "Identifier" && parent.type == "MemberExpression" && !parent.computed) {
+                                return // do not replace property calls. TODO: think about classes...
                             }
                         }
-                        if (node.left) {
-                            if (node.left.type == "Identifier") {
-                                if (!self.var_is_exists(node.left.name)) {
-                                    node.left.name = self.rand_variable_name();
-                                };
-                            }
-                        }
-                        if (node.right) {
-                            if (node.right.type == "Identifier") {
-                                if (!self.var_is_exists(node.right.name)) {
-                                    node.right.name = self.rand_variable_name();
-                                };
-                            }
-                        }
-                        if (node.argument) {
-                            if (node.argument.type == "Identifier") {
-                                if (!self.var_is_exists(node.argument.name)) {
-                                    node.argument.name = self.rand_variable_name();
-                                };
-                            } 
-                        }
-                        if (node.property) { // ?? a[i] i - это будет проперти, что делать с тем, что он свойства начал у всех заменять -_-
-                            if (node.property.type == "Identifier") {
-                                if (!self.var_is_exists(node.property.name)) {
-                                    node.property.name = self.rand_variable_name();
-                                };
-                            } 
+                        
+                        
+                        // у ноды есть свойства:
+                        // node.left
+                        // node.right
+                        // node.property // ?? a[i] i - это будет проперти, что делать с тем, что он свойства начал у всех заменять -_-
+                        // заменяет также функции
+                        if (node.type == "Identifier") {
+                            if (!self.var_exists(node.name)) {
+                                node.name = self.rand_variable_name();
+                            };
                         }
                     },
                     leave: function (node, parent) {}
@@ -337,7 +329,12 @@ class NodeReplacer {
                 }
             },
         })
+
+        nodes_to_insert.forEach(function(value, key, map){
+            self.ast.body.push(value);
+        })
     }
+
     get_mutated_code() {
         return escodegen.generate(this.ast);
     }
