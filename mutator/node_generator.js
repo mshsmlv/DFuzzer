@@ -203,7 +203,7 @@ class NodeReplacer {
     // https://habr.com/ru/post/78991/
     //
     //
-    // TODO нужно отслеживать "CallExpression" тип и затягивать функции в мутируемое дерево, если она не объявлена.
+    // отслеживать "CallExpression" тип и затягивать функции в мутируемое дерево, если она не объявлена.
     // Для этого нужно отслеживать глобальные функции, которые объявлены. Если ее нет в этом массиве(или что это есть),
     // то вставляем.
     prepare_node_for_insertion(new_node, source_tree) {
@@ -226,7 +226,7 @@ class NodeReplacer {
                         var selector = `[type="FunctionDeclaration"][id.name="${node.name}"]`;
                         if (esquery.query(self.ast, selector).length == 0) {
                             var node_from_source = esquery.query(source_tree, selector)
-                            if (node_from_source.length > 0) { // TODO нужно новую ноду тоже анализировать на предмет ВСЕГО.
+                            if (node_from_source.length > 0) {
                                 self.nodes_to_insert.set(
                                     node.name, 
                                     {
@@ -239,14 +239,51 @@ class NodeReplacer {
                         return // do not replace function calls.
                     }
 
-                    if (!/Function/.test(node.type)) { 
+                    // we are in `new MyClass()` construction.
+                    if (node.type == "Identifier" && parent.type == "NewExpression") {
+                        switch (node.name) {
+                            case "Map": return;
+                            case "Set": return;
+                            case "Array": return; // Skip standard classes. TODO: Add other standard types. 
+                        }
+
+                        if (self.nodes_to_insert.get(node.name)) {
+                            return;
+                        }
+                        var selector = `[type="ClassDeclaration"][id.name="${node.name}"]`;
+                        if (esquery.query(self.ast, selector).length == 0) {
+                            var node_from_source = esquery.query(source_tree, selector)
+                            if (node_from_source.length > 0) {
+                                self.nodes_to_insert.set(
+                                    node.name, 
+                                    {
+                                        node: node_from_source[0], 
+                                        source: source_tree
+                                    }
+                                );
+                            }
+                        }
+                        return // do not replace `new SomeClass()` constructions.
+                    }
+
+                    if (/Function/.test(node.type)) { 
                         return // do not replace function declaration names.
                     }
 
-                    // someClass.method
-                    if (node.type == "Identifier" && parent.type == "MemberExpression" && !parent.computed) {
-                        return // do not replace property calls. TODO: think about classes...
+                    // `someClass.method`. replace only someClass.
+                    if (
+                        node.type == "Identifier" &&
+                        parent.type == "MemberExpression" && 
+                        node == parent.property &&
+                        !parent.computed
+                     ) {
+                        return // do not replace property calls.
                     }
+                }
+
+                switch (node.name) {
+                    case 'console': return; // add standard modules here.
+                    case "Math": return;
                 }
 
                 if (node.type == "Identifier") {
@@ -311,8 +348,8 @@ class NodeReplacer {
                     default: return;
                 }
                 
-                //var [new_node, source_tree] = self.getNode(node.type);
-                var [new_node, source_tree] = self.getSpecifiedNode("./tests/insert_function_test.js", 0, node.type);
+                var [new_node, source_tree] = self.getNode(node.type);
+                //var [new_node, source_tree] = self.getSpecifiedNode("./tests/insert_function_test.js", 0, node.type);
 
                 self.prepare_node_for_insertion(new_node, source_tree);              
                 self.is_need_refresh_scope_manager = true;
