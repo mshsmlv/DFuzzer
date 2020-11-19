@@ -14,10 +14,7 @@ function randomChoice(arr) {
 // ./data-set/basic/doMath.js 0
 // ./data-set/basic/testMulOverflow.js 0
 // ./data-set/basic/testSwitchString.js 1
-// ./data-set/basic/bug686296.js 0 где не работает scope.
-
 // ./data-set/basic/testPrimitiveConstructorPrototype.js 2
-
 // ./data-set/basic/joinTest.js index: 2
 
 class NodeReplacer {
@@ -34,10 +31,12 @@ class NodeReplacer {
         this.new_node_variables = new Map();
         this.is_need_refresh_scope_manager = false;
 
-
         // we can have nested function declarations and leaving function context not garantee that we left function.
         this.function_stack = []; // [fun_name1, fun_name2], just to debug
         this.prev_scope = []; // [map1{}, map2{}],  stores previous scopes to restore scope of wrapper
+
+        // it collects new objects from sources during mutating.
+        this.nodes_to_insert = new Map()
     }
 
     in_function() {
@@ -190,6 +189,77 @@ class NodeReplacer {
         return self.__get_node(ast, aimed_type, node_index);
     }
 
+    // change variables name in new node if they are not declarated to the declarated variables:
+    // it can be:
+    // - global variable from mutated ast
+    // - variable which are accsessible for the current context(visible in a function and global variables)
+    // 
+    // OR leave variable name if it is declarated in new node
+    //
+    // 
+    // Если мы идем вглубь дерева, а мы идем вглубь, то видимость переменных сохраняется,
+    // просто добавляются новые.
+    // Видимость переменных в джава-скрипт ограничивается только функциями.
+    // https://habr.com/ru/post/78991/
+    //
+    //
+    // TODO нужно отслеживать "CallExpression" тип и затягивать функции в мутируемое дерево, если она не объявлена.
+    // Для этого нужно отслеживать глобальные функции, которые объявлены. Если ее нет в этом массиве(или что это есть),
+    // то вставляем.
+    prepare_node_for_insertion(new_node, source_tree) {
+        var self = this;
+        var sourceScopeManager = escope.analyze(source_tree);
+
+        estraverse.traverse(new_node, {
+            enter: function (node, parent) {
+                // returns list of variables which are declarated in a node.
+                // See https://github.com/estools/escope/blob/49a00b8b41c8d6221446bbf6b426d1ea64d80d00/src/scope-manager.js#L98
+                self.extract_new_node_varibles(sourceScopeManager.getDeclaredVariables(node));
+
+                if (parent) {
+                    // it means we are in a function call.
+                    // if calling function not in the tree, try to extraxt this node from source tree.
+                    if (node.type == "Identifier" && parent.type == "CallExpression") {
+                        if (self.nodes_to_insert.get(node.name)) {
+                            return;
+                        }
+                        var selector = `[type="FunctionDeclaration"][id.name="${node.name}"]`;
+                        if (esquery.query(self.ast, selector).length == 0) {
+                            var node_from_source = esquery.query(source_tree, selector)
+                            if (node_from_source.length > 0) { // TODO нужно новую ноду тоже анализировать на предмет ВСЕГО.
+                                self.nodes_to_insert.set(
+                                    node.name, 
+                                    {
+                                        node: node_from_source[0], 
+                                        source: source_tree
+                                    }
+                                );
+                            }
+                        }
+                        return // do not replace function calls.
+                    }
+
+                    if (!/Function/.test(node.type)) { 
+                        return // do not replace function declaration names.
+                    }
+
+                    // someClass.method
+                    if (node.type == "Identifier" && parent.type == "MemberExpression" && !parent.computed) {
+                        return // do not replace property calls. TODO: think about classes...
+                    }
+                }
+
+                if (node.type == "Identifier") {
+                    if (!self.var_exists(node.name)) {
+                        node.name = self.rand_variable_name();
+                    };
+                }
+            },
+            leave: function (node, parent) {}
+        });
+        self.free_new_node_variables();
+    }
+
     // mutate_blocks replaces blocks:
     // "ForStatement":
     // "ForInStatement":
@@ -203,8 +273,6 @@ class NodeReplacer {
     // It queries new block with the same type from the given data-set.
     mutate_blocks() {
         var self = this;
-
-        var nodes_to_insert = new Map();
         estraverse.replace(self.ast, {
             enter: function (node, parent) {
                 if(self.is_need_refresh_scope_manager) {
@@ -243,73 +311,10 @@ class NodeReplacer {
                     default: return;
                 }
                 
+                //var [new_node, source_tree] = self.getNode(node.type);
                 var [new_node, source_tree] = self.getSpecifiedNode("./tests/insert_function_test.js", 0, node.type);
 
-                //var [new_node, source_tree] = self.getNode(node.type);
-                var sourceScopeManager = escope.analyze(source_tree);
-
-                // change variables name in new node if they are not declarated to the declarated variables:
-                // it can be:
-                // - global variable from mutated ast
-                // - variable which are accsessible for the current context(visible in a function and global variables)
-                // 
-                // OR leave variable name if it is declarated in new node
-                //
-                // 
-                // Если мы идем вглубь дерева, а мы идем вглубь, то видимость переменных сохраняется,
-                // просто добавляются новые.
-                // Видимость переменных в джава-скрипт ограничивается только функциями.
-                // https://habr.com/ru/post/78991/
-                //
-                //
-                //
-                //
-                // TODO нужно отслеживать "CallExpression" тип и затягивать функции в мутируемое дерево, если она не объявлена.
-                // Для этого нужно отслеживать глобальные функции, которые объявлены. Если ее нет в этом массиве(или что это есть),
-                // то вставляем.
-                estraverse.traverse(new_node, {
-                    enter: function (node, parent) {
-                        // returns list of variables which are declarated in a node.
-                        // See https://github.com/estools/escope/blob/49a00b8b41c8d6221446bbf6b426d1ea64d80d00/src/scope-manager.js#L98
-                        self.extract_new_node_varibles(sourceScopeManager.getDeclaredVariables(node));
-
-                        if (parent) {
-                            // it means we are in a function call.
-                            if (node.type == "Identifier" && parent.type == "CallExpression") {
-                                var selector = `[type="FunctionDeclaration"][id.name="${node.name}"]`;
-                                // if calling function not in the tree, try to extraxt this node from source tree.
-
-                                if (nodes_to_insert.get(node.name)) {
-                                    return;
-                                }
-                                if (esquery.query(self.ast, selector).length == 0) {
-                                    var node_from_source = esquery.query(source_tree, selector)
-                                    if (node_from_source.length > 0) {
-                                        nodes_to_insert.set(node.name, node_from_source[0]);
-                                    }
-                                }
-                                return // do not replace function calls.
-                            }
-                            if (node.type == "Identifier" && parent.type == "MemberExpression" && !parent.computed) {
-                                return // do not replace property calls. TODO: think about classes...
-                            }
-                        }
-                        
-                        
-                        // у ноды есть свойства:
-                        // node.left
-                        // node.right
-                        // node.property // ?? a[i] i - это будет проперти, что делать с тем, что он свойства начал у всех заменять -_-
-                        // заменяет также функции
-                        if (node.type == "Identifier") {
-                            if (!self.var_exists(node.name)) {
-                                node.name = self.rand_variable_name();
-                            };
-                        }
-                    },
-                    leave: function (node, parent) {}
-                });
-                self.free_new_node_variables();
+                self.prepare_node_for_insertion(new_node, source_tree);              
                 self.is_need_refresh_scope_manager = true;
                 return new_node;
             }, 
@@ -330,8 +335,10 @@ class NodeReplacer {
             },
         })
 
-        nodes_to_insert.forEach(function(value, key, map){
-            self.ast.body.push(value);
+        // we do it in the end because we ara in a global context - it means that varriable arrays are empty.
+        self.nodes_to_insert.forEach(function(value, key, map){
+            self.prepare_node_for_insertion(value.node, value.source);
+            self.ast.body.push(value.node);
         })
     }
 
