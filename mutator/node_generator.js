@@ -1,16 +1,16 @@
-var esprima = require('esprima');
-var escope = require('escope');
-var estraverse = require('estraverse');
-var escodegen = require('escodegen');
-var esquery = require('esquery');
+const esprima = require('esprima');
+const escope = require('escope');
+const estraverse = require('estraverse');
+const escodegen = require('escodegen');
+const esquery = require('esquery');
 
 // https://esprima.readthedocs.io/en/latest/syntax-tree-format.html - вся инфа по возможным нодам
 
 function randomChoice(arr) {
-    return arr[Math.floor(Math.random() * arr.length)];
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
-//./data-set/basic/testincops.js 0
+// ./data-set/basic/testincops.js 0
 // ./data-set/basic/doMath.js 0
 // ./data-set/basic/testMulOverflow.js 0
 // ./data-set/basic/testSwitchString.js 1
@@ -18,416 +18,454 @@ function randomChoice(arr) {
 // ./data-set/basic/joinTest.js index: 2
 
 class NodeReplacer {
-    constructor(ast) {
-        this.ast = ast;
-        this.scopeManager = escope.analyze(this.ast);
+  constructor(ast) {
+    this.ast = ast;
+    this.scopeManager = escope.analyze(this.ast);
 
-        this.in_loop = false;
-        this.in_switch = false;
+    this.inLoop = false;
+    this.inSwitch = false;
 
-        // Helps to control variables.
-        this.global_variables = new Map();
-        this.function_variables = new Map();
-        this.new_node_variables = new Map();
-        this.is_need_refresh_scope_manager = false;
+    // Helps to control variables.
+    this.globalVariables = new Map();
+    this.functionVariables = new Map();
+    this.newNodeVariables = new Map();
+    this.isNeedRefreshScopeManager = false;
 
-        // we can have nested function declarations and leaving function context not garantee that we left function.
-        this.function_stack = []; // [fun_name1, fun_name2], just to debug
-        this.prev_scope = []; // [map1{}, map2{}],  stores previous scopes to restore scope of wrapper
+    // we can have nested function declarations and
+    // leaving function context not garantee that we left function.
+    // [fun_name1, fun_name2], just to debug
+    this.functionStack = [];
+    // [map1{}, map2{}],  stores previous scopes to restore scope of wrapper
+    this.prevScope = [];
 
-        // it collects new objects from sources during mutating.
-        this.nodes_to_insert = new Map()
+    // it collects new objects from sources during mutating.
+    this.nodesToInsert = new Map();
+  }
+
+  inFunction() {
+    if (this.functionStack.length > 0) {
+      return true;
+    }
+    return false;
+  }
+
+  __extractVariableNames(varMap, varArray) {
+    for (let i = 0; i < varArray.length; i++) {
+      varMap.set(varArray[i].name, 1);
+    }
+  }
+
+  extractGlobalVariables(varArray) {
+    this.__extractVariableNames(this.globalVariables, varArray);
+  }
+
+  extractFunctionVariables(varArray) {
+    this.__extractVariableNames(this.functionVariables, varArray);
+  }
+
+  extractNewNodeVaribles(varArray) {
+    this.__extractVariableNames(this.newNodeVariables, varArray);
+  }
+
+  freeFunctionVariables() {
+    this.functionVariables = this.prevScope.pop();
+    if (!this.functionVariables) {
+      this.functionVariables = new Map();
     }
 
-    in_function() {
-        if (this.function_stack.length > 0) {
-            return true;
-        }
-        return false;
+    this.functionStack.pop();
+  }
+
+  freeNewNodeVariables() {
+    this.newNodeVariables = new Map();
+  }
+
+  freeVariables(varArray) {
+    const self = this;
+    for (let i = 0; i < varArray.length; i++) {
+      self.globalVariables.set(varArray[i].name, 1);
     }
+  }
 
-    __extract_variable_names(var_map, var_array) {
-        for(var i = 0; i < var_array.length; i++) {
-            var_map.set(var_array[i].name, 1);
-        }
+  varExists(name) {
+    if (this.globalVariables.get(name)) {
+      return true;
     }
-
-    extract_global_variables(var_array) {
-        this.__extract_variable_names(this.global_variables, var_array);
+    if (this.newNodeVariables.get(name)) {
+      return true;
     }
-
-    extract_function_variables(var_array) {
-        this.__extract_variable_names(this.function_variables, var_array);
+    if (this.functionVariables.get(name)) {
+      return true;
     }
+    return false;
+  }
 
-    extract_new_node_varibles(var_array) {
-        this.__extract_variable_names(this.new_node_variables, var_array);
-    }
+  randVariableName() {
+    const merged = new Map([
+      ...this.globalVariables,
+      ...this.newNodeVariables,
+      ...this.functionVariables,
+    ]);
+    return randomChoice(Array.from(merged.keys()));
+  }
 
-    free_function_variables() {
-        this.function_variables = this.prev_scope.pop();
-        if (!this.function_variables) {
-            this.function_variables = new Map();
-        }
-
-        this.function_stack.pop();
-    }
-
-    free_new_node_variables() {
-        this.new_node_varibles = new Map();
-    }
-
-    free_variables(var_array) {
-        var self = this;
-        for(var i = 0; i < var_array.length; i++) {
-            self.global_variables.set(var_array[i].name, 1);
-        }
-    }
-
-    var_exists(name) {
-        if (this.global_variables.get(name)) {
-            return true;
-        }
-        if (this.new_node_variables.get(name)) {
-            return true;
-        }
-        if (this.function_variables.get(name)) {
-            return true;
-        }
-        return false;
-    }
-
-    rand_variable_name() {
-        var merged = new Map([
-            ...this.global_variables, 
-            ...this.new_node_variables, 
-            ...this.function_variables
-        ]);
-        return randomChoice(Array.from(merged.keys()))
-    }
-
-    // it skipes nodes which are not applicable for the current context.
-    __node_is_applicable(node) {
-        var self = this;
-        var is_applicable = true;
-        estraverse.traverse(node, {
-            enter: function (node, parent) {
-                switch (node.type) {
-                    case 'BreakStatement':
-                        if (!self.in_loop && !self.in_switch) {
-                            is_applicable = false;
-                        };
-                        break;
-                    case 'ReturnStatement':
-                        if (!self.in_function()) {
-                            is_applicable = false;
-                        }
-                    case 'ContinueStatement':
-                        if (!self.in_loop) {
-                            is_applicable = false;
-                        }
-                }
-            },
-            leave: function (node, parent) {}
-        })
-        return is_applicable;
-    }
-    
-    // it gets applicable node for the current context with @aimed_type.
-    // if @index is set it will return all_applicable_nodes_from_ast[index].
-    // if @index is not set it will return all_applicable_nodes_from_ast[random_index].
-    __get_node(ast, aimed_type, index) {
-        var self = this;
-        var res_nodes = []
-        estraverse.traverse(ast, {
-            enter: function (node, parent) {
-                if (node.type == aimed_type && self.__node_is_applicable(node)) {
-                    res_nodes.push(node);
-                }
-            },
-            leave: function (node, parent) {
-            }
-        });
-
-        if (!index) {
-            index = Math.floor(Math.random() * res_nodes
-            .length);
+  // it skipes nodes which are not applicable for the current context.
+  __nodeIsApplicable(node) {
+    const self = this;
+    let isApplicable = true;
+    estraverse.traverse(node, {
+      enter: function(node, parent) {
+        switch (node.type) {
+          case 'BreakStatement':
+            if (!self.inLoop && !self.inSwitch) {
+              isApplicable = false;
             };
-
-            console.log("index:", index);
-            return [res_nodes[index], ast];
-    }
-
-    getNode(aimed_type) {
-        var self = this;
-
-        while (true) { 
-            var tree_file = "./data-set/basic/" + randomChoice(trees);
-            var code = fs.readFileSync(tree_file, "utf-8");
-
-            try {
-                var ast = esprima.parse(code);
-            } catch(e) {
-                continue
+            break;
+          case 'ReturnStatement':
+            if (!self.inFunction()) {
+              isApplicable = false;
             }
-            console.log(tree_file);
-            var [new_node, source_tree] = self.__get_node(ast, aimed_type);
-            if (new_node) {
-                return [new_node, source_tree];
+          case 'ContinueStatement':
+            if (!self.inLoop) {
+              isApplicable = false;
             }
-            continue;
         }
+      },
+      leave: function(node, parent) {},
+    });
+    return isApplicable;
+  }
+
+  // it gets applicable node for the current context with @aimed_type.
+  // if @index is set it will return: all_applicable_nodes_from_ast[index].
+  // if @index is not set it will return:
+  // all_applicable_nodes_from_ast[random_index].
+  __getNode(ast, aimedType, index) {
+    const self = this;
+    const resNodes = [];
+    estraverse.traverse(ast, {
+      enter: function(node, parent) {
+        if (node.type == aimedType && self.__nodeIsApplicable(node)) {
+          resNodes.push(node);
+        }
+      },
+      leave: function(node, parent) {
+      },
+    });
+
+    if (!index) {
+      index = Math.floor(Math.random() * resNodes.length);
+    };
+
+    console.log('index:', index);
+    return [resNodes[index], ast];
+  }
+
+  getNode(aimedType) {
+    const self = this;
+
+    while (true) {
+      const treeFile = './data-set/basic/' + randomChoice(trees);
+      const code = fs.readFileSync(treeFile, 'utf-8');
+
+      let ast;
+      try {
+        ast = esprima.parse(code);
+      } catch (e) {
+        continue;
+      }
+      console.log(treeFile);
+      const [newNode, sourceTree] = self.__getNode(ast, aimedType);
+      if (newNode) {
+        return [newNode, sourceTree];
+      }
+      continue;
+    }
+  }
+
+  // just for debug. It gets a node from a specified tree
+  // with the specified index.
+  getSpecifiedNode(treeFile, nodeIndex, aimedType) {
+    const self = this;
+
+    const code = fs.readFileSync(treeFile, 'utf-8');
+    const ast = esprima.parse(code);
+
+    return self.__getNode(ast, aimedType, nodeIndex);
+  }
+
+  insertNodeFromSource(node, sourceTree, selector) {
+    const self = this;
+
+    // if the node is in a queue for insertion already, skip it.
+    if (self.nodesToInsert.get(node.name)) {
+      return;
     }
 
-    // just for debug. It gets a node from a specified tree with the specified index.
-    getSpecifiedNode(tree_file, node_index, aimed_type) {
-        var self = this;
-
-        var code = fs.readFileSync(tree_file, "utf-8");
-        var ast = esprima.parse(code);
-
-        return self.__get_node(ast, aimed_type, node_index);
-    }
-
-    // change variables name in new node if they are not declarated to the declarated variables:
-    // it can be:
-    // - global variable from mutated ast
-    // - variable which are accsessible for the current context(visible in a function and global variables)
-    // 
-    // OR leave variable name if it is declarated in new node
-    //
-    // 
-    // Если мы идем вглубь дерева, а мы идем вглубь, то видимость переменных сохраняется,
-    // просто добавляются новые.
-    // Видимость переменных в джава-скрипт ограничивается только функциями.
-    // https://habr.com/ru/post/78991/
-    //
-    //
-    // отслеживать "CallExpression" тип и затягивать функции в мутируемое дерево, если она не объявлена.
-    // Для этого нужно отслеживать глобальные функции, которые объявлены. Если ее нет в этом массиве(или что это есть),
-    // то вставляем.
-    prepare_node_for_insertion(new_node, source_tree) {
-        var self = this;
-        var sourceScopeManager = escope.analyze(source_tree);
-
-        estraverse.traverse(new_node, {
-            enter: function (node, parent) {
-                // returns list of variables which are declarated in a node.
-                // See https://github.com/estools/escope/blob/49a00b8b41c8d6221446bbf6b426d1ea64d80d00/src/scope-manager.js#L98
-                self.extract_new_node_varibles(sourceScopeManager.getDeclaredVariables(node));
-
-                if (parent) {
-                    // it means we are in a function call.
-                    // if calling function not in the tree, try to extraxt this node from source tree.
-                    if (node.type == "Identifier" && parent.type == "CallExpression") {
-                        if (self.nodes_to_insert.get(node.name)) {
-                            return;
-                        }
-                        var selector = `[type="FunctionDeclaration"][id.name="${node.name}"]`;
-                        if (esquery.query(self.ast, selector).length == 0) {
-                            var node_from_source = esquery.query(source_tree, selector)
-                            if (node_from_source.length > 0) {
-                                self.nodes_to_insert.set(
-                                    node.name, 
-                                    {
-                                        node: node_from_source[0], 
-                                        source: source_tree
-                                    }
-                                );
-                            }
-                        }
-                        return // do not replace function calls.
-                    }
-
-                    // we are in `new MyClass()` construction.
-                    if (node.type == "Identifier" && parent.type == "NewExpression") {
-                        switch (node.name) {
-                            case "Map": return;
-                            case "Set": return;
-                            case "Array": return; // Skip standard classes. TODO: Add other standard types. 
-                        }
-
-                        if (self.nodes_to_insert.get(node.name)) {
-                            return;
-                        }
-                        var selector = `[type="ClassDeclaration"][id.name="${node.name}"]`;
-                        if (esquery.query(self.ast, selector).length == 0) {
-                            var node_from_source = esquery.query(source_tree, selector)
-                            if (node_from_source.length > 0) {
-                                self.nodes_to_insert.set(
-                                    node.name, 
-                                    {
-                                        node: node_from_source[0], 
-                                        source: source_tree
-                                    }
-                                );
-                            }
-                        }
-                        return // do not replace `new SomeClass()` constructions.
-                    }
-
-                    if (/Function/.test(node.type)) { 
-                        return // do not replace function declaration names.
-                    }
-
-                    // `someClass.method`. replace only someClass.
-                    if (
-                        node.type == "Identifier" &&
-                        parent.type == "MemberExpression" && 
-                        node == parent.property &&
-                        !parent.computed
-                     ) {
-                        return // do not replace property calls.
-                    }
-                }
-
-                switch (node.name) {
-                    case 'console': return; // add standard modules here.
-                    case "Math": return;
-                }
-
-                if (node.type == "Identifier") {
-                    if (!self.var_exists(node.name)) {
-                        node.name = self.rand_variable_name();
-                    };
-                }
+    // add new node from source tree if it doesn't exist in the original ast.
+    if (esquery.query(self.ast, selector).length == 0) {
+      const nodeFromSource = esquery.query(sourceTree, selector);
+      if (nodeFromSource.length > 0) {
+        self.nodes_to_insert.set(
+            node.name,
+            {
+              node: nodeFromSource[0],
+              source: sourceTree,
             },
-            leave: function (node, parent) {}
-        });
-        self.free_new_node_variables();
+        );
+      }
     }
+  }
 
-    // mutate_blocks replaces blocks:
-    // "ForStatement":
-    // "ForInStatement":
-    // "IfStatement":
-    // "DoWhileStatement":
-    // "SwitchStatement":
-    // "WhileStatement":
-    // "WithStatement":
-    // "BlockStatement":
-    //
-    // It queries new block with the same type from the given data-set.
-    mutate_blocks() {
-        var self = this;
-        estraverse.replace(self.ast, {
-            enter: function (node, parent) {
-                if(self.is_need_refresh_scope_manager) {
-                    self.scopeManager = escope.analyze(self.ast);
-                    self.is_need_refresh_scope_manager = false;
-                }
+  // change variables name in new node
+  // if they are not declarated to the declarated variables. It can be:
+  //
+  // - global variable from mutated ast
+  // - variable which are accsessible for the current context
+  // (visible in a function and global variables)
+  //
+  // OR leave variable name if it is declarated in new node
+  //
+  // Если мы идем вглубь дерева, а мы идем вглубь,
+  // то видимость переменных сохраняется,просто добавляются новые.
+  // Видимость переменных в джава-скрипт ограничивается только функциями.
+  // https://habr.com/ru/post/78991/
+  //
+  //
+  // отслеживать "CallExpression" тип и затягивать функции в мутируемое дерево,
+  // если она не объявлена. Для этого нужно отслеживать глобальные функции,
+  // которые объявлены. Если ее нет в этом массиве(или что это есть),
+  // то вставляем.
+  prepareNodeForInsertion(newNode, sourceTree) {
+    const self = this;
+    const sourceScopeManager = escope.analyze(sourceTree);
 
-                if (/Function/.test(node.type)) {
-                    if (node.id) {
-                        self.function_stack.push(node.id.name);
-                    } else {
-                        self.function_stack.push("anon_function");
-                    }
+    estraverse.traverse(newNode, {
+      enter: function(node, parent) {
+        // returns list of variables which are declarated in a node.
+        self.extractNewNodeVaribles(
+            sourceScopeManager.getDeclaredVariables(node));
+         
+        if (/Function/.test(node.type)) {
+          return; // do not replace function declaration names.
+        }
 
-                    self.prev_scope.push(new Map(self.function_variables));
-                }
+        switch (node.name) {
+          case 'console': return; // add standard modules here.
+          case 'Math': return;
+        }
 
-                if (self.in_function()) {
-                    // skip function names -_0_0_-.
-                    if (!/Function/.test(node.type)) {
-                        self.extract_function_variables(self.scopeManager.getDeclaredVariables(node));
-                    }
-                } else {
-                    self.extract_global_variables(self.scopeManager.getDeclaredVariables(node));
-                }
+        if (parent) {
+          // it means we are in a function call.
+          // if calling function not in the tree,
+          // try to extraxt this node from the source tree.
+          if (node.type == 'Identifier' &&
+              parent.type == 'CallExpression') {
+            self.insertNodeFromSource(
+              node,
+              sourceTree,
+              `[type="FunctionDeclaration"][id.name="${node.name}"]`
+            )
+            return; // do not replace function calls.
+          }
 
-                switch(node.type) {
-                    case "DoWhileStatement":
-                    case "ForStatement":
-                    case "ForInStatement":
-                    case "ForOfStatement":
-                    case "WhileStatement": self.in_loop = true;
-                    case "SwitchStatement": self.is_switch = true;
-                    case  "WithStatement": break;
-                    //case  "BlockStatement": break; // Нужен ли нам блок стейтмент?
-                    default: return;
-                }
-                
-                var [new_node, source_tree] = self.getNode(node.type);
-                //var [new_node, source_tree] = self.getSpecifiedNode("./tests/insert_function_test.js", 0, node.type);
+          // we are in `new MyClass()` construction.
+          // try to extraxt class definition from the source tres.
+          if (node.type == 'Identifier' &&
+              parent.type == 'NewExpression') {
+            // Skip standard classes. TODO: Add other standard types.
+            switch (node.name) {
+              case 'Map':
+              case 'Set':
+              case 'Array': return;
+            }
 
-                self.prepare_node_for_insertion(new_node, source_tree);              
-                self.is_need_refresh_scope_manager = true;
-                return new_node;
-            }, 
-            leave: function (node, parent) {  
-                // delete variables which are declarated in function node.
-                if (/Function/.test(node.type)) {
-                    self.free_function_variables();
-                }
+            self.insertNodeFromSource(
+              node,
+              sourceTree,
+              `[type="ClassDeclaration"][id.name="${node.name}"]`
+            )
+            return; // do not replace `new SomeClass()` constructions.
+          }
 
-                switch(node.type) {
-                    case "DoWhileStatement":
-                    case "ForStatement":
-                    case "ForInStatement":
-                    case "ForOfStatement":
-                    case "WhileStatement": self.in_loop = false; break;
-                    case "SwitchStatement": self.is_switch = false; break;
-                }
-            },
-        })
+          // `someClass.method`. replace only someClass.
+          if (
+            node.type == 'Identifier' &&
+            parent.type == 'MemberExpression' &&
+            node == parent.property &&
+            !parent.computed) {
+            return; // do not replace property calls.
+          }
+        }
 
-        // we do it in the end because we ara in a global context - it means that varriable arrays are empty.
-        self.nodes_to_insert.forEach(function(value, key, map){
-            self.prepare_node_for_insertion(value.node, value.source);
-            self.ast.body.push(value.node);
-        })
-    }
+        // And finaly replace the all rest.
+        if (node.type == 'Identifier') {
+          if (!self.varExists(node.name)) {
+            node.name = self.randVariableName();
+          };
+        }
+      },
+      leave: function(node, parent) {},
+    });
+    self.freeNewNodeVariables();
+  }
 
-    get_mutated_code() {
-        return escodegen.generate(this.ast);
-    }
+  // mutate_blocks replaces blocks:
+  // "ForStatement":
+  // "ForInStatement":
+  // "IfStatement":
+  // "DoWhileStatement":
+  // "SwitchStatement":
+  // "WhileStatement":
+  // "WithStatement":
+  // "BlockStatement":
+  //
+  // It queries new block with the same type from the given data-set.
+  mutateBlocks() {
+    const self = this;
+
+    estraverse.replace(self.ast, {
+      enter: function(node, parent) {
+        if (self.isNeedRefreshScopeManager) {
+          self.scopeManager = escope.analyze(self.ast);
+          self.isNeedRefreshScopeManager = false;
+        }
+
+        if (/Function/.test(node.type)) {
+          if (node.id) {
+            self.functionStack.push(node.id.name);
+          } else {
+            self.functionStack.push('anon_function');
+          }
+
+          self.prevScope.push(new Map(self.functionVariables));
+        }
+
+        // Control new names.
+        // If we are in function, add new variable to the function variables.
+        // If not, add new variable to the global variables.
+        if (self.inFunction()) {
+          // skip function names -_0_0_-.
+          if (!/Function/.test(node.type)) {
+            self.extractFunctionVariables(
+                self.scopeManager.getDeclaredVariables(node),
+            );
+          }
+        } else {
+          self.extractGlobalVariables(
+              self.scopeManager.getDeclaredVariables(node),
+          );
+        }
+
+        switch (node.type) {
+          case 'DoWhileStatement':
+          case 'ForStatement':
+          case 'ForInStatement':
+          case 'ForOfStatement':
+          case 'WhileStatement': self.inLoop = true;
+          case 'SwitchStatement': self.isSwitch = true;
+          case 'WithStatement': break;
+        // case  "BlockStatement": break; // Нужен ли нам блок стейтмент?
+          default: return;
+        }
+
+        const [newNode, sourceTree] = self.getNode(node.type);
+        // const [newNode, sourceTree] = self.getSpecifiedNode(
+        // "./tests/insert_function_test.js", 0, node.type);
+
+        self.prepareNodeForInsertion(newNode, sourceTree);
+        self.isNeedRefreshScopeManager = true;
+        return newNode;
+      },
+      leave: function(node, parent) {
+        // delete variables which are declarated in function node.
+        if (/Function/.test(node.type)) {
+          self.freeFunctionVariables();
+        }
+
+        switch (node.type) {
+          case 'DoWhileStatement':
+          case 'ForStatement':
+          case 'ForInStatement':
+          case 'ForOfStatement':
+          case 'WhileStatement': self.inLoop = false; break;
+          case 'SwitchStatement': self.isSwitch = false; break;
+        }
+      },
+    });
+
+    // we do it in the end because we ara in a global context -
+    // it means that varriable arrays are empty.
+    self.nodesToInsert.forEach(function(value, key, map) {
+      self.prepareNodeForInsertion(value.node, value.source);
+      self.ast.body.push(value.node);
+    });
+  }
+
+  getMutatedCode() {
+    return escodegen.generate(this.ast);
+  }
 }
 
-let binary_operator = ['+','-','*','/','%','**','&','|','^','<<','>>','>>>']; // Math operator
-let binary_condition = ['==','!=','<','<=','>','>=','===','!==','instanceof','in']; // condition operator
-let assign_operator = ['+=','-=','*=','**=','/=','%=','&=','^=','|=','<<=','>>=','>>>=','='];
-let boolean_value = ['false','true'];
-let unary_operator = ['~','-','!','++','--','+','']; // '...' 'typeof'
-let update_operator = ['++','--'];
-let logical_operator = ['&&','||'];
+// Math operator.
+const binaryOperator =
+  ['+', '-', '*', '/', '%', '**', '&', '|', '^', '<<', '>>', '>>>'];
 
-// mutate_expressions just changes one simple expression to another one.
-function mutate_expressions(ast, scopeManager) {
-    estraverse.traverse(ast, {
-        enter: function (node, parent) {
-            switch(node.type) {
-                case "BinaryExpression": node.operator = randomChoice(binary_operator);
-                case "LogicalExpression": node.operator = randomChoice(logical_operator);
-                case "AssignmentExpression": node.operator = randomChoice(assign_operator);
-                case "UnaryExpression":  node.operator = randomChoice(unary_operator);
-                case "UpdateExpression": node.operator = randomChoice(update_operator);
-            }
-        },
-        leave: function (node, parent) {
-        }
-    });
+// condition operator.
+// const binaryCondition =
+// ['==', '!=', '<', '<=', '>', '>=', '===', '!==', 'instanceof', 'in'];
+const assignOperator =
+  ['+=', '-=', '*=', '**=', '/=', '%=', '&=', '^=', '|=', '<<=', '>>=',
+    '>>>=', '='];
+// const booleanValue = ['false', 'true'];
+
+// '...' 'typeof'
+const unaryOperator =
+  ['~', '-', '!', '++', '--', '+', ''];
+const updateOperator = ['++', '--'];
+const logicalOperator = ['&&', '||'];
+
+// mutateExpressions just changes one simple expression to another one.
+function mutateExpressions(ast, scopeManager) {
+  estraverse.traverse(ast, {
+    enter: function(node, parent) {
+      switch (node.type) {
+        case 'BinaryExpression':
+          node.operator = randomChoice(binaryOperator);
+        case 'LogicalExpression':
+          node.operator = randomChoice(logicalOperator);
+        case 'AssignmentExpression':
+          node.operator = randomChoice(assignOperator);
+        case 'UnaryExpression':
+          node.operator = randomChoice(unaryOperator);
+        case 'UpdateExpression':
+          node.operator = randomChoice(updateOperator);
+      }
+    },
+    leave: function(node, parent) {
+    },
+  });
 };
 
 module.exports = {
-    mutate_code: mutate_code,
+  mutateCode: mutateCode,
 };
 
-function mutate_code(code) {
-    var ast = esprima.parse(code);
+function mutateCode(code) {
+  const ast = esprima.parse(code);
 
-    node_replacer = new NodeReplacer(ast);
-    node_replacer.mutate_blocks();
-    return node_replacer.get_mutated_code();
+  const nodeReplacer = new NodeReplacer(ast);
+  nodeReplacer.mutateBlocks();
+  return nodeReplacer.getMutatedCode();
 }
 
-var fs = require("fs");
-data_set_dir = "./data-set/basic"
-var trees = fs.readdirSync(data_set_dir);
+const fs = require('fs');
+const dataSetDir = './data-set/basic';
+const trees = fs.readdirSync(dataSetDir);
 
-var seed_file = process.argv[2];
-var raw = fs.readFileSync(seed_file, "utf-8");
-mutated_code = mutate_code(raw);
+const seedFile = process.argv[2];
+const raw = fs.readFileSync(seedFile, 'utf-8');
+const mutatedCode = mutateCode(raw);
 
-console.log("========MUTATED CODE ============");
-console.log(mutated_code);
+console.log('========MUTATED CODE ============');
+console.log(mutatedCode);
