@@ -33,7 +33,7 @@ class NodeReplacer {
 
     // we can have nested function declarations and
     // leaving function context not garantee that we left function.
-    // [fun_name1, fun_name2], just to debug
+    // [fun_name1, fun_name2], just for debug.
     this.functionStack = [];
     // [map1{}, map2{}],  stores previous scopes to restore scope of wrapper
     this.prevScope = [];
@@ -206,7 +206,7 @@ class NodeReplacer {
     if (esquery.query(self.ast, selector).length == 0) {
       const nodeFromSource = esquery.query(sourceTree, selector);
       if (nodeFromSource.length > 0) {
-        self.nodes_to_insert.set(
+        self.nodesToInsert.set(
             node.name,
             {
               node: nodeFromSource[0],
@@ -245,7 +245,7 @@ class NodeReplacer {
         // returns list of variables which are declarated in a node.
         self.extractNewNodeVaribles(
             sourceScopeManager.getDeclaredVariables(node));
-         
+
         if (/Function/.test(node.type)) {
           return; // do not replace function declaration names.
         }
@@ -262,10 +262,10 @@ class NodeReplacer {
           if (node.type == 'Identifier' &&
               parent.type == 'CallExpression') {
             self.insertNodeFromSource(
-              node,
-              sourceTree,
-              `[type="FunctionDeclaration"][id.name="${node.name}"]`
-            )
+                node,
+                sourceTree,
+                `[type="FunctionDeclaration"][id.name="${node.name}"]`,
+            );
             return; // do not replace function calls.
           }
 
@@ -281,10 +281,10 @@ class NodeReplacer {
             }
 
             self.insertNodeFromSource(
-              node,
-              sourceTree,
-              `[type="ClassDeclaration"][id.name="${node.name}"]`
-            )
+                node,
+                sourceTree,
+                `[type="ClassDeclaration"][id.name="${node.name}"]`,
+            );
             return; // do not replace `new SomeClass()` constructions.
           }
 
@@ -365,7 +365,7 @@ class NodeReplacer {
           case 'WhileStatement': self.inLoop = true;
           case 'SwitchStatement': self.isSwitch = true;
           case 'WithStatement': break;
-        // case  "BlockStatement": break; // Нужен ли нам блок стейтмент?
+            // case  "BlockStatement": break; // Нужен ли нам блок стейтмент?
           default: return;
         }
 
@@ -426,7 +426,7 @@ const updateOperator = ['++', '--'];
 const logicalOperator = ['&&', '||'];
 
 // mutateExpressions just changes one simple expression to another one.
-function mutateExpressions(ast, scopeManager) {
+function mutateExpressions(ast) {
   estraverse.traverse(ast, {
     enter: function(node, parent) {
       switch (node.type) {
@@ -451,21 +451,31 @@ module.exports = {
   mutateCode: mutateCode,
 };
 
+function getRandomInt(max) {
+  return Math.floor(Math.random() * Math.floor(max));
+}
+
 function mutateCode(code) {
   const ast = esprima.parse(code);
 
-  const nodeReplacer = new NodeReplacer(ast);
-  nodeReplacer.mutateBlocks();
-  return nodeReplacer.getMutatedCode();
+  const suppaPupaMutationStratagy = getRandomInt(2);
+  switch (suppaPupaMutationStratagy) {
+    case 0: mutateExpressions(ast);
+      return  escodegen.generate(ast);
+    case 1: 
+      const nodeReplacer = new NodeReplacer(ast);
+      nodeReplacer.mutateBlocks();
+      return nodeReplacer.getMutatedCode();
+  }
 }
 
 const fs = require('fs');
 const dataSetDir = './data-set/basic';
 const trees = fs.readdirSync(dataSetDir);
-
+/*
 const seedFile = process.argv[2];
 const raw = fs.readFileSync(seedFile, 'utf-8');
 const mutatedCode = mutateCode(raw);
 
 console.log('========MUTATED CODE ============');
-console.log(mutatedCode);
+console.log(mutatedCode);*/

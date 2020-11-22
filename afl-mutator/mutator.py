@@ -24,7 +24,7 @@ def init(seed):
     @type seed: int
     @param seed: A 32-bit random value
     '''
-    random.seed(seed)
+    pass
 
 
 def deinit():
@@ -50,6 +50,8 @@ def fuzz(buf, add_buf, max_size):
     '''
 
     r = requests.post("http://127.0.0.1:8080/get_next", data={"code": buf.decode()})
+    if len(r.text) > max_size:
+      print("wrong size", len(r.text), max_size)
     ret = bytearray(len(r.text))
     ret[:len(r.text)] = r.text.encode()
     return ret
@@ -78,7 +80,7 @@ def init_trim(buf):
 
     return 0
 #
-# def trim():
+def trim():
 #     '''
 #     Called per trimming iteration.
 #
@@ -88,10 +90,10 @@ def init_trim(buf):
 #     global ...
 #
 #     # Implement the actual trimming here
+
+    return bytearray(...)
 #
-#     return bytearray(...)
-#
-# def post_trim(success):
+def post_trim(success):
 #     '''
 #     Called after each trimming operation.
 #
@@ -110,7 +112,7 @@ def init_trim(buf):
 #         # Just determine the next index, based on what was successfully
 #         # removed in the last step
 #
-#     return next_index
+     return 0
 #
 # def post_process(buf):
 #     '''
@@ -163,7 +165,6 @@ def queue_get(filename):
 #     @return: Return True if the custom mutator decides to fuzz the test case,
 #         and False otherwise
 #     '''
-    print(filename)
     return True
 #
 def queue_new_entry(filename_new_queue, filename_orig_queue):
