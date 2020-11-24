@@ -10,13 +10,6 @@ function randomChoice(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// ./data-set/basic/testincops.js 0
-// ./data-set/basic/doMath.js 0
-// ./data-set/basic/testMulOverflow.js 0
-// ./data-set/basic/testSwitchString.js 1
-// ./data-set/basic/testPrimitiveConstructorPrototype.js 2
-// ./data-set/basic/joinTest.js index: 2
-
 class NodeReplacer {
   constructor(ast) {
     this.ast = ast;
@@ -164,8 +157,22 @@ class NodeReplacer {
   getNode(aimedType) {
     const self = this;
 
+    let treeFile;
     while (true) {
-      const treeFile = './data-set/basic/' + randomChoice(trees);
+      let suppaPupaMutationStratagy;
+      if (paths.length == 0) {
+        suppaPupaMutationStratagy = 0;
+      } else {
+        suppaPupaMutationStratagy = getRandomInt(2);
+      } 
+
+      switch (suppaPupaMutationStratagy) {
+        case 0: treeFile = './data-set/basic/' + randomChoice(trees);
+        case 1: 
+          treeFile = fuzzDirectory + '/' + randomChoice(paths); 
+          console.log("GET FROM NEW PATHS:", treeFile);
+      }
+
       const code = fs.readFileSync(treeFile, 'utf-8');
 
       let ast;
@@ -447,9 +454,7 @@ function mutateExpressions(ast) {
   });
 };
 
-module.exports = {
-  mutateCode: mutateCode,
-};
+
 
 function getRandomInt(max) {
   return Math.floor(Math.random() * Math.floor(max));
@@ -472,6 +477,19 @@ function mutateCode(code) {
 const fs = require('fs');
 const dataSetDir = './data-set/basic';
 const trees = fs.readdirSync(dataSetDir);
+let paths = [];
+const fuzzDirectory = process.argv[2];
+console.log(fuzzDirectory);
+
+function addNewPath(new_path) {
+  paths.push(new_path); // here are the races, but who cares -_0_0_-
+}
+
+module.exports = {
+  mutateCode: mutateCode,
+  addNewPath: addNewPath
+};
+
 /*
 const seedFile = process.argv[2];
 const raw = fs.readFileSync(seedFile, 'utf-8');
