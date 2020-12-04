@@ -164,13 +164,16 @@ class NodeReplacer {
         suppaPupaMutationStratagy = 0;
       } else {
         suppaPupaMutationStratagy = getRandomInt(2);
-      } 
+      }
 
       switch (suppaPupaMutationStratagy) {
-        case 0: treeFile = './data-set/basic/' + randomChoice(trees);
-        case 1: 
-          treeFile = fuzzDirectory + '/' + randomChoice(paths); 
-          console.log("GET FROM NEW PATHS:", treeFile);
+        case 0:
+          treeFile = './data-set/basic/' + randomChoice(trees);
+          break;
+        case 1:
+          treeFile = fuzzDirectory + '/' + randomChoice(paths);
+          console.log('GET FROM NEW PATHS:', treeFile);
+          break;
       }
 
       const code = fs.readFileSync(treeFile, 'utf-8');
@@ -455,6 +458,38 @@ function mutateExpressions(ast) {
 };
 
 
+literalNums =
+[0, 1, 1.00, 1/2, 1E2, 1E02, 1E+02, 1E02, +0, +0.0, 0.00,
+  999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999,
+  0x0,
+  0xffffffff,
+  0xffffffffffffffff,
+  0xabad1dea,
+  123456789012345678901234567890123456789,
+  1000.00,
+  1000000.00,
+  1000.00,
+  100000.000,
+  100000000,
+  01000,
+  08,
+  09,
+  2.2250738585072011e-308];
+
+function mutateLiterals(ast) {
+  estraverse.replace(ast, {
+    enter: function(node, parent) {
+      if (node.type == 'Literal') {
+        if (typeof node.value == 'number') {
+          node.value = randomChoice(literalNums);
+        };
+        return node;
+      }
+    },
+    leave: function(node, parent) {
+    },
+  });
+}
 
 function getRandomInt(max) {
   return Math.floor(Math.random() * Math.floor(max));
@@ -463,11 +498,15 @@ function getRandomInt(max) {
 function mutateCode(code) {
   const ast = esprima.parse(code);
 
-  const suppaPupaMutationStratagy = getRandomInt(2);
+  const suppaPupaMutationStratagy = getRandomInt(3);
   switch (suppaPupaMutationStratagy) {
-    case 0: mutateExpressions(ast);
-      return  escodegen.generate(ast);
-    case 1: 
+    case 0:
+      mutateExpressions(ast);
+      return escodegen.generate(ast);
+    case 1:
+      mutateLiterals(ast); ;
+      return escodegen.generate(ast);
+    case 2:
       const nodeReplacer = new NodeReplacer(ast);
       nodeReplacer.mutateBlocks();
       return nodeReplacer.getMutatedCode();
@@ -477,23 +516,23 @@ function mutateCode(code) {
 const fs = require('fs');
 const dataSetDir = './data-set/basic';
 const trees = fs.readdirSync(dataSetDir);
-let paths = [];
+const paths = [];
 const fuzzDirectory = process.argv[2];
 console.log(fuzzDirectory);
 
-function addNewPath(new_path) {
-  paths.push(new_path); // here are the races, but who cares -_0_0_-
+function addNewPath(newPath) {
+  paths.push(newPath); // here are the races, but who cares -_0_0_-
 }
 
 module.exports = {
   mutateCode: mutateCode,
-  addNewPath: addNewPath
+  addNewPath: addNewPath,
 };
 
-/*
+
 const seedFile = process.argv[2];
 const raw = fs.readFileSync(seedFile, 'utf-8');
 const mutatedCode = mutateCode(raw);
 
 console.log('========MUTATED CODE ============');
-console.log(mutatedCode);*/
+console.log(mutatedCode);
