@@ -437,19 +437,40 @@ const logicalOperator = ['&&', '||'];
 
 // mutateExpressions just changes one simple expression to another one.
 function mutateExpressions(ast) {
+  let suppaPupaMutationStratagy = 0;
   estraverse.traverse(ast, {
     enter: function(node, parent) {
       switch (node.type) {
         case 'BinaryExpression':
-          node.operator = randomChoice(binaryOperator);
+          suppaPupaMutationStratagy = getRandomInt(4); // change only 25%.
+          if (suppaPupaMutationStratagy == 0) {
+            node.operator = randomChoice(binaryOperator);
+          }
+          break;
         case 'LogicalExpression':
-          node.operator = randomChoice(logicalOperator);
+          suppaPupaMutationStratagy = getRandomInt(4); // change only 25%.
+          if (suppaPupaMutationStratagy == 0) {
+            node.operator = randomChoice(logicalOperator);
+          }
+          break;
         case 'AssignmentExpression':
-          node.operator = randomChoice(assignOperator);
+          suppaPupaMutationStratagy = getRandomInt(4); // change only 25%.
+          if (suppaPupaMutationStratagy == 0) {
+            node.operator = randomChoice(assignOperator);
+          }
+          break;
         case 'UnaryExpression':
-          node.operator = randomChoice(unaryOperator);
+          suppaPupaMutationStratagy = getRandomInt(4); // change only 25%.
+          if (suppaPupaMutationStratagy == 0) {
+            node.operator = randomChoice(unaryOperator);
+          }
+          break;
         case 'UpdateExpression':
-          node.operator = randomChoice(updateOperator);
+          suppaPupaMutationStratagy = getRandomInt(4); // change only 25%.
+          if (suppaPupaMutationStratagy == 0) {
+            node.operator = randomChoice(updateOperator);
+          }
+          break;
       }
     },
     leave: function(node, parent) {
@@ -481,10 +502,14 @@ function mutateLiterals(ast) {
     enter: function(node, parent) {
       if (node.type == 'Literal') {
         if (typeof node.value == 'number') {
-          node.value = randomChoice(literalNums);
-        };
-        return node;
-      }
+          // change only 25% of numbers.
+          const suppaPupaMutationStratagy = getRandomInt(4);
+          if (suppaPupaMutationStratagy == 0) {
+            node.value = randomChoice(literalNums);
+          }
+        }
+      };
+      return node;
     },
     leave: function(node, parent) {
     },
@@ -530,9 +555,9 @@ module.exports = {
 };
 
 
-const seedFile = process.argv[2];
+/* const seedFile = process.argv[2];
 const raw = fs.readFileSync(seedFile, 'utf-8');
 const mutatedCode = mutateCode(raw);
 
 console.log('========MUTATED CODE ============');
-console.log(mutatedCode);
+console.log(mutatedCode); */
