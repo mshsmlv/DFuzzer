@@ -4,6 +4,8 @@ const estraverse = require('estraverse');
 const escodegen = require('escodegen');
 const esquery = require('esquery');
 
+const config = require('./config');
+
 // https://esprima.readthedocs.io/en/latest/syntax-tree-format.html - вся инфа по возможным нодам
 
 function randomChoice(arr) {
@@ -165,13 +167,13 @@ class NodeReplacer {
       } else {
         suppaPupaMutationStratagy = getRandomInt(2);
       }
-
+      
       switch (suppaPupaMutationStratagy) {
         case 0:
-          treeFile = './data-set/basic/' + randomChoice(trees);
+          treeFile = config.dataSetDir + randomChoice(trees);
           break;
         case 1:
-          treeFile = fuzzDirectory + '/' + randomChoice(paths);
+          treeFile = config.fuzzDirectory + randomChoice(paths);
           console.log('GET FROM NEW PATHS:', treeFile);
           break;
       }
@@ -539,11 +541,8 @@ function mutateCode(code) {
 }
 
 const fs = require('fs');
-const dataSetDir = './data-set/basic';
-const trees = fs.readdirSync(dataSetDir);
+const trees = fs.readdirSync(config.dataSetDir);
 const paths = [];
-const fuzzDirectory = process.argv[2];
-console.log(fuzzDirectory);
 
 function addNewPath(newPath) {
   paths.push(newPath); // here are the races, but who cares -_0_0_-
@@ -554,10 +553,11 @@ module.exports = {
   addNewPath: addNewPath,
 };
 
-
-/* const seedFile = process.argv[2];
+/*
+const seedFile = process.argv[2];
 const raw = fs.readFileSync(seedFile, 'utf-8');
 const mutatedCode = mutateCode(raw);
 
 console.log('========MUTATED CODE ============');
-console.log(mutatedCode); */
+console.log(mutatedCode);
+*/
