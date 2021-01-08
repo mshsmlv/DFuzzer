@@ -17,6 +17,9 @@ class NodeReplacer {
     this.ast = ast;
     this.scopeManager = escope.analyze(this.ast);
 
+    // node replacing is an infinite process and we need to break it someday.
+    this.mutationCounter = 0;
+
     this.inLoop = false;
     this.inSwitch = false;
 
@@ -152,11 +155,12 @@ class NodeReplacer {
       index = Math.floor(Math.random() * resNodes.length);
     };
 
-    console.log('index:', index);
+   // console.log('index:', index);
     return [resNodes[index], ast];
   }
 
   getNode(aimedType) {
+    console.log("type:", aimedType);
     const self = this;
 
     let treeFile;
@@ -167,14 +171,14 @@ class NodeReplacer {
       } else {
         suppaPupaMutationStratagy = getRandomInt(2);
       }
-      
+
       switch (suppaPupaMutationStratagy) {
         case 0:
           treeFile = config.dataSetDir + randomChoice(trees);
           break;
         case 1:
           treeFile = config.fuzzDirectory + randomChoice(paths);
-          console.log('GET FROM NEW PATHS:', treeFile);
+      //    console.log('GET FROM NEW PATHS:', treeFile);
           break;
       }
 
@@ -186,7 +190,7 @@ class NodeReplacer {
       } catch (e) {
         continue;
       }
-      console.log(treeFile);
+      //console.log(treeFile);
       const [newNode, sourceTree] = self.__getNode(ast, aimedType);
       if (newNode) {
         return [newNode, sourceTree];
@@ -338,6 +342,12 @@ class NodeReplacer {
 
     estraverse.replace(self.ast, {
       enter: function(node, parent) {
+
+        // mutation limit reached, just leave.
+        if (self.mutationCounter >= config.maxMutations) {
+          return;
+        }
+
         if (self.isNeedRefreshScopeManager) {
           self.scopeManager = escope.analyze(self.ast);
           self.isNeedRefreshScopeManager = false;
@@ -377,9 +387,23 @@ class NodeReplacer {
           case 'WhileStatement': self.inLoop = true;
           case 'SwitchStatement': self.isSwitch = true;
           case 'WithStatement': break;
-            // case  "BlockStatement": break; // Нужен ли нам блок стейтмент?
-          default: return;
+          // skip simple nodes.
+          case 'BinaryExpression':
+          case 'LogicalExpression':
+          case 'AssignmentExpression':
+          case 'UnaryExpression':
+          case 'UpdateExpression': 
+          case 'ReturnStatement':
+          case 'Identifier': 
+          case 'Literal':
+          case 'Program': 
+          case 'BreakStatement': 
+          case 'ContinueStatement': return;
+          default: ;
         }
+
+        const suppaPupaMutationStratagy = getRandomInt(20); // mutate not all blocks -_0_0_-
+        if (suppaPupaMutationStratagy != 0) {return}
 
         const [newNode, sourceTree] = self.getNode(node.type);
         // const [newNode, sourceTree] = self.getSpecifiedNode(
@@ -387,6 +411,8 @@ class NodeReplacer {
 
         self.prepareNodeForInsertion(newNode, sourceTree);
         self.isNeedRefreshScopeManager = true;
+
+        self.mutationCounter += 1;
         return newNode;
       },
       leave: function(node, parent) {
