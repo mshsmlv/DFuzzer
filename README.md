@@ -1,8 +1,8 @@
 # DFuzzer
 
-DFuzzer is a coverage-guided, grammar-based fuzzer for JavaScript engines. The distinctive feature of this fuzzer is constructing grammar. The grammar is constructed from a set of JavaScript programs. This approach improved finding new paths in the target JavaScript Engine.
+DFuzzer is a coverage-guided, grammar-based fuzzer for JavaScript engines. The distinctive feature of this fuzzer is constructing grammar. Instead of setting grammar rules by hand, this fuzzer constructs the grammar from a set of JavaScript programs. This approach improved finding new paths in the target JavaScript Engine.
 
-See the principles of work in [paper](http://vital.lib.tsu.ru/vital/access/services/Download/vital:13533/SOURCE01) (In Russian only).
+See the principles of work and measurement results in [paper](http://vital.lib.tsu.ru/vital/access/services/Download/vital:13533/SOURCE01) (In Russian only).
 
 Inspired by [the Nautilus Fuzzer](https://github.com/nautilus-fuzz/nautilus).
 
